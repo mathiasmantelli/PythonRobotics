@@ -3,6 +3,7 @@
 Path planning Sample Code with Randomized Rapidly-Exploring Random Trees (RRT)
 
 author: AtsushiSakai(@Atsushi_twi)
+author: Mathias Mantelli (@mathiasmantelli)
 
 """
 
@@ -10,6 +11,7 @@ import math
 import random
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 
 show_animation = True
@@ -25,11 +27,13 @@ class RRT:
         RRT Node
         """
 
-        def __init__(self, x, y):
+        def __init__(self, x, y, z):
             self.x = x
             self.y = y
+            self.z = z
             self.path_x = []
             self.path_y = []
+            self.path_z = []
             self.parent = None
 
     class AreaBounds:
@@ -39,6 +43,8 @@ class RRT:
             self.xmax = float(area[1])
             self.ymin = float(area[2])
             self.ymax = float(area[3])
+            self.zmin = float(area[4])
+            self.zmax = float(area[5])
 
 
     def __init__(self,
@@ -56,16 +62,16 @@ class RRT:
         """
         Setting Parameter
 
-        start:Start Position [x,y]
-        goal:Goal Position [x,y]
-        obstacleList:obstacle Positions [[x,y,size],...]
+        start:Start Position [x,y,z]
+        goal:Goal Position [x,y,z]
+        obstacleList:obstacle Positions [[x,y,z,size],...]
         randArea:Random Sampling Area [min,max]
-        play_area:stay inside this area [xmin,xmax,ymin,ymax]
+        play_area:stay inside this area [xmin,xmax,ymin,ymax,zmin,zmax]
         robot_radius: robot body modeled as circle with given radius
 
         """
-        self.start = self.Node(start[0], start[1])
-        self.end = self.Node(goal[0], goal[1])
+        self.start = self.Node(start[0], start[1], start[2])
+        self.end = self.Node(goal[0], goal[1], goal[2])
         self.min_rand = rand_area[0]
         self.max_rand = rand_area[1]
         if play_area is not None:
@@ -104,7 +110,7 @@ class RRT:
                 self.draw_graph(rnd_node)
 
             if self.calc_dist_to_goal(self.node_list[-1].x,
-                                      self.node_list[-1].y) <= self.expand_dis:
+                                      self.node_list[-1].y, self.node_list[-1].z) <= self.expand_dis:
                 final_node = self.steer(self.node_list[-1], self.end,
                                         self.expand_dis)
                 if self.check_collision(
@@ -118,11 +124,12 @@ class RRT:
 
     def steer(self, from_node, to_node, extend_length=float("inf")):
 
-        new_node = self.Node(from_node.x, from_node.y)
-        d, theta = self.calc_distance_and_angle(new_node, to_node)
+        new_node = self.Node(from_node.x, from_node.y, from_node.z)
+        d, azimuth, elevation  = self.calc_distance_and_angles(new_node, to_node)
 
         new_node.path_x = [new_node.x]
         new_node.path_y = [new_node.y]
+        new_node.path_z = [new_node.z]
 
         if extend_length > d:
             extend_length = d
@@ -130,90 +137,103 @@ class RRT:
         n_expand = math.floor(extend_length / self.path_resolution)
 
         for _ in range(n_expand):
-            new_node.x += self.path_resolution * math.cos(theta)
-            new_node.y += self.path_resolution * math.sin(theta)
+            new_node.x += self.path_resolution * math.cos(elevation) * math.cos(azimuth)
+            new_node.y += self.path_resolution * math.cos(elevation) * math.sin(azimuth)
+            new_node.z += self.path_resolution * math.sin(elevation)
             new_node.path_x.append(new_node.x)
             new_node.path_y.append(new_node.y)
+            new_node.path_z.append(new_node.z)
 
-        d, _ = self.calc_distance_and_angle(new_node, to_node)
+        d, _, _ = self.calc_distance_and_angles(new_node, to_node)
         if d <= self.path_resolution:
             new_node.path_x.append(to_node.x)
             new_node.path_y.append(to_node.y)
+            new_node.path_z.append(to_node.z)
             new_node.x = to_node.x
             new_node.y = to_node.y
+            new_node.z = to_node.z
 
         new_node.parent = from_node
 
         return new_node
 
     def generate_final_course(self, goal_ind):
-        path = [[self.end.x, self.end.y]]
+        path = [[self.end.x, self.end.y, self.end.z]]
         node = self.node_list[goal_ind]
         while node.parent is not None:
-            path.append([node.x, node.y])
+            path.append([node.x, node.y, node.z])
             node = node.parent
-        path.append([node.x, node.y])
+        path.append([node.x, node.y, node.z])
 
         return path
 
-    def calc_dist_to_goal(self, x, y):
+    def calc_dist_to_goal(self, x, y, z):
         dx = x - self.end.x
         dy = y - self.end.y
-        return math.hypot(dx, dy)
+        dz = z - self.end.z
+        return math.sqrt(dx**2 + dy**2 + dz**2)
 
     def get_random_node(self):
         if random.randint(0, 100) > self.goal_sample_rate:
             rnd = self.Node(
                 random.uniform(self.min_rand, self.max_rand),
+                random.uniform(self.min_rand, self.max_rand),
                 random.uniform(self.min_rand, self.max_rand))
         else:  # goal point sampling
-            rnd = self.Node(self.end.x, self.end.y)
+            rnd = self.Node(self.end.x, self.end.y, self.end.z)
         return rnd
 
     def draw_graph(self, rnd=None):
-        plt.clf()
-        # for stopping simulation with the esc key.
-        plt.gcf().canvas.mpl_connect(
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        fig.canvas.mpl_connect(
             'key_release_event',
             lambda event: [exit(0) if event.key == 'escape' else None])
         if rnd is not None:
-            plt.plot(rnd.x, rnd.y, "^k")
+            ax.scatter(rnd.x, rnd.y, rnd.z, marker="^", color="k")
             if self.robot_radius > 0.0:
-                self.plot_circle(rnd.x, rnd.y, self.robot_radius, '-r')
+                self.plot_circle(ax, rnd.x, rnd.y, rnd.z, self.robot_radius, color='-r')
         for node in self.node_list:
             if node.parent:
-                plt.plot(node.path_x, node.path_y, "-g")
+                ax.plot(node.path_x, node.path_y, node.path_z, "-g")
 
-        for (ox, oy, size) in self.obstacle_list:
-            self.plot_circle(ox, oy, size)
+        for (ox, oy, oz, size) in self.obstacle_list:
+            self.plot_circle(ax, ox, oy, oz, size)
 
         if self.play_area is not None:
-            plt.plot([self.play_area.xmin, self.play_area.xmax,
+            ax.plot([self.play_area.xmin, self.play_area.xmax,
                       self.play_area.xmax, self.play_area.xmin,
                       self.play_area.xmin],
                      [self.play_area.ymin, self.play_area.ymin,
                       self.play_area.ymax, self.play_area.ymax,
                       self.play_area.ymin],
+                      [0, 0, 0, 0, 0],
                      "-k")
 
-        plt.plot(self.start.x, self.start.y, "xr")
-        plt.plot(self.end.x, self.end.y, "xr")
-        plt.axis("equal")
-        plt.axis([-2, 15, -2, 15])
-        plt.grid(True)
+        ax.scatter(self.start.x, self.start.y, self.start.z, color="r", marker="x")
+        ax.scatter(self.end.x, self.end.y, self.end.z, color="r", marker="x")
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_xlim([-2, 10])
+        ax.set_ylim([-2, 10])
+        ax.set_zlim([-2, 10])
+
+        plt.grid(True) 
         plt.pause(0.01)
+        plt.show()
 
     @staticmethod
-    def plot_circle(x, y, size, color="-b"):  # pragma: no cover
-        deg = list(range(0, 360, 5))
-        deg.append(0)
-        xl = [x + size * math.cos(np.deg2rad(d)) for d in deg]
-        yl = [y + size * math.sin(np.deg2rad(d)) for d in deg]
-        plt.plot(xl, yl, color)
+    def plot_circle(ax, x, y, z, size, color="-b"):  # pragma: no cover
+        theta = np.linspace(0, 2*np.pi, 100)
+        xl = x + size * np.cos(theta)
+        yl = y + size * np.sin(theta)
+        zl = z * np.ones_like(theta)
+        ax.plot(xl, yl, zl, color)
 
     @staticmethod
     def get_nearest_node_index(node_list, rnd_node):
-        dlist = [(node.x - rnd_node.x)**2 + (node.y - rnd_node.y)**2
+        dlist = [(node.x - rnd_node.x)**2 + (node.y - rnd_node.y)**2 + (node.z - rnd_node.z)**2
                  for node in node_list]
         minind = dlist.index(min(dlist))
 
@@ -226,7 +246,8 @@ class RRT:
             return True  # no play_area was defined, every pos should be ok
 
         if node.x < play_area.xmin or node.x > play_area.xmax or \
-           node.y < play_area.ymin or node.y > play_area.ymax:
+           node.y < play_area.ymin or node.y > play_area.ymax or \
+            node.z < play_area.zmin or node.z > play_area.zmax:
             return False  # outside - bad
         else:
             return True  # inside - ok
@@ -237,10 +258,11 @@ class RRT:
         if node is None:
             return False
 
-        for (ox, oy, size) in obstacleList:
+        for (ox, oy, oz, size) in obstacleList:
             dx_list = [ox - x for x in node.path_x]
             dy_list = [oy - y for y in node.path_y]
-            d_list = [dx * dx + dy * dy for (dx, dy) in zip(dx_list, dy_list)]
+            dz_list = [oz - z for z in node.path_z]
+            d_list = [dx * dx + dy * dy + dz * dz for (dx, dy, dz) in zip(dx_list, dy_list, dz_list)]
 
             if min(d_list) <= (size+robot_radius)**2:
                 return False  # collision
@@ -248,25 +270,27 @@ class RRT:
         return True  # safe
 
     @staticmethod
-    def calc_distance_and_angle(from_node, to_node):
+    def calc_distance_and_angles(from_node, to_node):
         dx = to_node.x - from_node.x
         dy = to_node.y - from_node.y
-        d = math.hypot(dx, dy)
-        theta = math.atan2(dy, dx)
-        return d, theta
+        dz = to_node.z - from_node.z
 
+        distance = math.sqrt(dx**2 + dy**2 + dz**2)
+        azimuth = math.atan2(dy, dx)
+        elevation_rad = math.atan2(dz, math.sqrt(dx**2 + dy**2))
+        return distance, azimuth, elevation_rad 
 
-def main(gx=6.0, gy=10.0):
+def main(gx=6.0, gy=10.0, gz=1.0):
     print("start " + __file__)
 
     # ====Search Path with RRT====
-    obstacleList = [(5, 5, 1), (3, 6, 2), (3, 8, 2), (3, 10, 2), (7, 5, 2),
-                    (9, 5, 2), (8, 10, 1)]  # [x, y, radius]
+    obstacleList = [(5, 5, 1, 1), (3, 6, 1, 2), (3, 8, 1, 2), (3, 10, 1, 2), (7, 5, 1, 2),
+                    (9, 5, 1, 2), (8, 10, 1, 1)]  # [x, y, z, radius]
     # Set Initial parameters
     rrt = RRT(
-        start=[0, 0],
-        goal=[gx, gy],
-        rand_area=[-2, 15],
+        start=[0, 0, 0],
+        goal=[gx, gy, gz],
+        rand_area=[-2, 10],
         obstacle_list=obstacleList,
         # play_area=[0, 10, 0, 14]
         robot_radius=0.8
@@ -281,7 +305,10 @@ def main(gx=6.0, gy=10.0):
         # Draw final path
         if show_animation:
             rrt.draw_graph()
-            plt.plot([x for (x, y) in path], [y for (x, y) in path], '-r')
+            path_x, path_y, path_z = zip(*path)
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+            ax.plot(path_x, path_y, path_z, '-r', linewidth=2)
             plt.grid(True)
             plt.pause(0.01)  # Need for Mac
             plt.show()
