@@ -23,7 +23,8 @@ def get_path_length(path):
     for i in range(len(path) - 1):
         dx = path[i + 1][0] - path[i][0]
         dy = path[i + 1][1] - path[i][1]
-        d = math.hypot(dx, dy)
+        dz = path[i + 1][2] - path[i][2]
+        d = math.sqrt(dx**2 + dy**2 + dz**2)
         le += d
 
     return le
@@ -36,7 +37,8 @@ def get_target_point(path, targetL):
     for i in range(len(path) - 1):
         dx = path[i + 1][0] - path[i][0]
         dy = path[i + 1][1] - path[i][1]
-        d = math.hypot(dx, dy)
+        dz = path[i + 1][2] - path[i][2]
+        d = math.sqrt(dx**2 + dy**2 + dz**2)
         le += d
         if le >= targetL:
             ti = i - 1
@@ -47,8 +49,9 @@ def get_target_point(path, targetL):
 
     x = path[ti][0] + (path[ti + 1][0] - path[ti][0]) * partRatio
     y = path[ti][1] + (path[ti + 1][1] - path[ti][1]) * partRatio
+    z = path[ti][2] + (path[ti + 1][2] - path[ti][2]) * partRatio
 
-    return [x, y, ti]
+    return [x, y, z, ti]
 
 
 def line_collision_check(first, second, obstacleList):
@@ -84,13 +87,13 @@ def path_smoothing(path, max_iter, obstacle_list):
         first = get_target_point(path, pickPoints[0])
         second = get_target_point(path, pickPoints[1])
 
-        if first[2] <= 0 or second[2] <= 0:
+        if first[3] <= 0 or second[3] <= 0:
             continue
 
-        if (second[2] + 1) > len(path):
+        if (second[3] + 1) > len(path):
             continue
 
-        if second[2] == first[2]:
+        if second[3] == first[3]:
             continue
 
         # collision check
@@ -113,14 +116,14 @@ def main():
     # ====Search Path with RRT====
     # Parameter
     obstacleList = [
-        (5, 5, 1),
-        (3, 6, 2),
-        (3, 8, 2),
-        (3, 10, 2),
-        (7, 5, 2),
-        (9, 5, 2)
+        (5, 5, 1, 1),
+        (3, 6, 1, 2),
+        (3, 8, 1, 2),
+        (3, 10, 1, 2),
+        (7, 5, 1, 2),
+        (9, 5, 1, 2)
     ]  # [x,y,size]
-    rrt = RRT(start=[0, 0], goal=[6, 10],
+    rrt = RRT(start=[0, 0, 0], goal=[6, 10, 1],
               rand_area=[-2, 15], obstacle_list=obstacleList)
     path = rrt.planning(animation=show_animation)
 
